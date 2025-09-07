@@ -3,6 +3,7 @@ import { StatsCard } from '../components/dashboard/StatsCard';
 import { DeviceChart } from '../components/dashboard/DeviceChart';
 import { UsageChart } from '../components/dashboard/UsageChart';
 import { RecentAlerts } from '../components/dashboard/RecentAlerts';
+import DatabaseTest from '../components/DatabaseTest';
 import {
   Smartphone,
   CheckCircle,
@@ -15,6 +16,7 @@ import {
 import { DashboardStats, DeviceTypeStats, MonthlyUsage, Alert } from '../types';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
+import { ApiService } from '../lib/api-service';
 
 export function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -31,68 +33,43 @@ export function DashboardPage() {
     try {
       setLoading(true);
       
-      // Mock data for demonstration since we don't have a real backend
-      const mockStats: DashboardStats = {
-        total_devices: 147,
-        available_devices: 89,
-        in_use_devices: 42,
-        maintenance_devices: 12,
-        decommissioned_devices: 4,
-        active_alerts: 8,
-        locations: 12
-      };
+      // Fetch real data from database
+      const [statsData, deviceTypeData, monthlyUsageData, alertsData] = await Promise.all([
+        ApiService.getDashboardStats(),
+        ApiService.getDeviceTypeStats(),
+        ApiService.getMonthlyUsage(),
+        ApiService.getAlerts()
+      ]);
 
-      const mockDeviceTypeStats: DeviceTypeStats[] = [
-        { type: 'Router', count: 45 },
-        { type: 'Switch', count: 38 },
-        { type: 'Modem', count: 32 },
-        { type: 'Cable', count: 32 }
-      ];
+      // Transform device type stats
+      const transformedDeviceTypeStats: DeviceTypeStats[] = deviceTypeData.map((item: any) => ({
+        type: item.type.charAt(0).toUpperCase() + item.type.slice(1),
+        count: parseInt(item.count)
+      }));
 
-      const mockMonthlyUsage: MonthlyUsage[] = [
-        { month: 'Jan', usage_hours: 2840 },
-        { month: 'Feb', usage_hours: 3120 },
-        { month: 'Mar', usage_hours: 2960 },
-        { month: 'Apr', usage_hours: 3340 },
-        { month: 'May', usage_hours: 3780 },
-        { month: 'Jun', usage_hours: 4120 }
-      ];
+      // Transform monthly usage data
+      const transformedMonthlyUsage: MonthlyUsage[] = monthlyUsageData.map((item: any) => ({
+        month: item.month,
+        usage_hours: parseInt(item.usage_hours)
+      }));
 
-      const mockAlerts: Alert[] = [
-        {
-          id: '1',
-          title: 'Router maintenance due',
-          description: 'Cisco Router #RT-001 requires scheduled maintenance',
-          type: 'maintenance',
-          severity: 'medium',
-          status: 'active',
-          created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
-        },
-        {
-          id: '2',
-          title: 'Low cable inventory',
-          description: 'Ethernet cables running low in warehouse',
-          type: 'low_stock',
-          severity: 'high',
-          status: 'active',
-          created_at: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()
-        },
-        {
-          id: '3',
-          title: 'Device warranty expiring',
-          description: 'Switch #SW-012 warranty expires in 30 days',
-          type: 'end_of_life',
-          severity: 'low',
-          status: 'active',
-          created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
-        }
-      ];
+      // Transform alerts data
+      const transformedAlerts: Alert[] = alertsData.slice(0, 3).map((alert: any) => ({
+        id: alert.id.toString(),
+        title: alert.alert,
+        description: alert.description,
+        type: alert.type,
+        severity: alert.severity,
+        status: alert.status.toLowerCase(),
+        created_at: alert.created_at
+      }));
 
-      setStats(mockStats);
-      setDeviceTypeStats(mockDeviceTypeStats);
-      setMonthlyUsage(mockMonthlyUsage);
-      setRecentAlerts(mockAlerts);
+      setStats(statsData);
+      setDeviceTypeStats(transformedDeviceTypeStats);
+      setMonthlyUsage(transformedMonthlyUsage);
+      setRecentAlerts(transformedAlerts);
     } catch (error) {
+      console.error('Failed to load dashboard data:', error);
       toast.error('Failed to load dashboard data');
     } finally {
       setLoading(false);
@@ -113,6 +90,9 @@ export function DashboardPage() {
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Dashboard Overview</h1>
         <p className="text-gray-600">Monitor your telecom device infrastructure at a glance</p>
       </div>
+
+      {/* Database Connection Test */}
+      <DatabaseTest />
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

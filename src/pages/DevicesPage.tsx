@@ -7,6 +7,22 @@ import { Plus, Edit, Trash2, Filter, Search } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
+import { ApiService } from '../lib/api-service';
+
+// Status mapping utilities
+const DB_TO_FRONTEND_STATUS: { [key: string]: string } = {
+  'Active': 'available',
+  'Inactive': 'in_use',
+  'Maintenance': 'maintenance',
+  'Decommissioned': 'decommissioned'
+};
+
+const FRONTEND_TO_DB_STATUS: { [key: string]: string } = {
+  'available': 'Active',
+  'in_use': 'Inactive',
+  'maintenance': 'Maintenance',
+  'decommissioned': 'Decommissioned'
+};
 
 export function DevicesPage() {
   const { user } = useAuth();
@@ -36,47 +52,29 @@ export function DevicesPage() {
   const fetchDevices = async () => {
     try {
       setLoading(true);
-      // Mock data for demonstration
-      const mockDevices: Device[] = [
-        {
-          id: '1',
-          name: 'Router RT-001',
-          type: 'router',
-          status: 'available',
-          serial_number: 'RT001-2024-001',
-          model: 'Cisco ISR 4321',
-          purchase_date: '2024-01-15',
-          warranty_expiry: '2027-01-15',
-          created_at: '2024-01-15T10:00:00Z',
-          updated_at: '2024-01-15T10:00:00Z'
-        },
-        {
-          id: '2',
-          name: 'Switch SW-001',
-          type: 'switch',
-          status: 'in_use',
-          serial_number: 'SW001-2024-001',
-          model: 'Juniper EX3400',
-          purchase_date: '2024-02-10',
-          warranty_expiry: '2027-02-10',
-          created_at: '2024-02-10T10:00:00Z',
-          updated_at: '2024-02-10T10:00:00Z'
-        },
-        {
-          id: '3',
-          name: 'Modem MD-001',
-          type: 'modem',
-          status: 'maintenance',
-          serial_number: 'MD001-2024-001',
-          model: 'Arris SB8200',
-          purchase_date: '2024-01-20',
-          warranty_expiry: '2026-01-20',
-          created_at: '2024-01-20T10:00:00Z',
-          updated_at: '2024-01-20T10:00:00Z'
-        }
-      ];
-      setDevices(mockDevices);
+      const devices = await ApiService.getDevices();
+      // Transform database data to match Device interface
+      const transformedDevices: Device[] = devices.map((device: any) => ({
+        id: device.id.toString(),
+        name: device.device_name,
+        type: device.type,
+        status: DB_TO_FRONTEND_STATUS[device.status] || 'available',
+        serial_number: device.serial_number,
+        model: device.model,
+        purchase_date: device.purchase_date,
+        warranty_expiry: device.warranty_expiry || null,
+        created_at: device.created_at,
+        updated_at: device.updated_at,
+        location: device.location_name ? {
+          id: device.location_id?.toString(),
+          name: device.location_name,
+          city: device.city,
+          country: device.country
+        } : null
+      }));
+      setDevices(transformedDevices);
     } catch (error) {
+      console.error('Failed to load devices:', error);
       toast.error('Failed to load devices');
     } finally {
       setLoading(false);
@@ -129,10 +127,11 @@ export function DevicesPage() {
     if (!confirm('Are you sure you want to delete this device?')) return;
 
     try {
-      // Mock delete operation
+      await ApiService.deleteDevice(parseInt(deviceId));
       setDevices(prev => prev.filter(device => device.id !== deviceId));
       toast.success('Device deleted successfully');
     } catch (error) {
+      console.error('Failed to delete device:', error);
       toast.error('Failed to delete device');
     }
   };
@@ -260,16 +259,39 @@ export function DevicesPage() {
       >
         <DeviceForm
           onSubmit={async (data) => {
-            // Mock add operation
-            const newDevice: Device = {
-              ...data,
-              id: Math.random().toString(36).substr(2, 9),
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            };
-            setDevices(prev => [...prev, newDevice]);
-            setIsAddModalOpen(false);
-            toast.success('Device added successfully');
+            try {
+              const newDevice = await ApiService.createDevice({
+                device_name: data.name,
+                type: data.type,
+                status: FRONTEND_TO_DB_STATUS[data.status] || 'Active',
+                serial_number: data.serial_number,
+                model: data.model,
+                purchase_date: data.purchase_date,
+                location_id: data.location?.id ? parseInt(data.location.id) : null
+              });
+              
+              // Transform the response to match Device interface
+              const transformedDevice: Device = {
+                id: newDevice.id.toString(),
+                name: newDevice.device_name,
+                type: newDevice.type,
+                status: DB_TO_FRONTEND_STATUS[newDevice.status] || 'available',
+                serial_number: newDevice.serial_number,
+                model: newDevice.model,
+                purchase_date: newDevice.purchase_date,
+                warranty_expiry: newDevice.warranty_expiry || null,
+                created_at: newDevice.created_at,
+                updated_at: newDevice.updated_at,
+                location: data.location
+              };
+              
+              setDevices(prev => [...prev, transformedDevice]);
+              setIsAddModalOpen(false);
+              toast.success('Device added successfully');
+            } catch (error) {
+              console.error('Failed to add device:', error);
+              toast.error('Failed to add device');
+            }
           }}
           onCancel={() => setIsAddModalOpen(false)}
         />
@@ -285,15 +307,42 @@ export function DevicesPage() {
         <DeviceForm
           device={selectedDevice}
           onSubmit={async (data) => {
-            // Mock edit operation
-            setDevices(prev => prev.map(device => 
-              device.id === selectedDevice?.id 
-                ? { ...device, ...data, updated_at: new Date().toISOString() }
-                : device
-            ));
-            setIsEditModalOpen(false);
-            setSelectedDevice(null);
-            toast.success('Device updated successfully');
+            try {
+              const updatedDevice = await ApiService.updateDevice(parseInt(selectedDevice!.id), {
+                device_name: data.name,
+                type: data.type,
+                status: FRONTEND_TO_DB_STATUS[data.status] || 'Active',
+                serial_number: data.serial_number,
+                model: data.model,
+                purchase_date: data.purchase_date,
+                location_id: data.location?.id ? parseInt(data.location.id) : null
+              });
+              
+              // Transform the response to match Device interface
+              const transformedDevice: Device = {
+                id: updatedDevice.id.toString(),
+                name: updatedDevice.device_name,
+                type: updatedDevice.type,
+                status: DB_TO_FRONTEND_STATUS[updatedDevice.status] || 'available',
+                serial_number: updatedDevice.serial_number,
+                model: updatedDevice.model,
+                purchase_date: updatedDevice.purchase_date,
+                warranty_expiry: updatedDevice.warranty_expiry || null,
+                created_at: updatedDevice.created_at,
+                updated_at: updatedDevice.updated_at,
+                location: data.location
+              };
+              
+              setDevices(prev => prev.map(device => 
+                device.id === selectedDevice?.id ? transformedDevice : device
+              ));
+              setIsEditModalOpen(false);
+              setSelectedDevice(null);
+              toast.success('Device updated successfully');
+            } catch (error) {
+              console.error('Failed to update device:', error);
+              toast.error('Failed to update device');
+            }
           }}
           onCancel={() => {
             setIsEditModalOpen(false);

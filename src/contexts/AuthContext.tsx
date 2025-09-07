@@ -1,12 +1,10 @@
 import React, { createContext, useContext, useState } from 'react';
-import { User as SupabaseUser } from '@supabase/supabase-js';
 import { User } from '../types';
 import toast from 'react-hot-toast';
-import { MOCK_ADMIN_USER, MOCK_SUPABASE_USER } from '../lib/mock-data';
+import { MOCK_ADMIN_USER } from '../lib/mock-data';
 
 interface AuthContextType {
   user: User | null;
-  supabaseUser: SupabaseUser | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -18,8 +16,32 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
-  const [loading, setLoading] = useState(false); // Start with loading false
+  const [loading, setLoading] = useState(true); // Start with loading true
+
+  // Auto-login demo user on app startup
+  React.useEffect(() => {
+    const autoLogin = async () => {
+      try {
+        // Simulate a brief loading period
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Auto-login with demo credentials
+        const demoEmail = import.meta.env.VITE_DEMO_ADMIN_EMAIL || 'admin@telecom.demo';
+        const demoPassword = import.meta.env.VITE_DEMO_ADMIN_PASSWORD || 'demo123456';
+        
+        if (demoEmail === 'admin@telecom.demo' && demoPassword === 'demo123456') {
+          setUser(MOCK_ADMIN_USER);
+          console.log('Auto-logged in as demo admin user');
+        }
+      } catch (error) {
+        console.error('Auto-login failed:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    autoLogin();
+  }, []);
 
   const signIn = async (email: string, password: string) => {
     setLoading(true);
@@ -30,7 +52,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (email === demoEmail && password === demoPassword) {
           setUser(MOCK_ADMIN_USER);
-          setSupabaseUser(MOCK_SUPABASE_USER);
           toast.success('Signed in successfully (Demo Mode)');
           setLoading(false);
           resolve();
@@ -50,7 +71,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     setUser(null);
-    setSupabaseUser(null);
     toast.success('Signed out successfully (Demo Mode)');
     return Promise.resolve();
   };
@@ -63,7 +83,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const value = {
     user,
-    supabaseUser,
     loading,
     signIn,
     signOut,

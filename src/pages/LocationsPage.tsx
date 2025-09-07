@@ -5,6 +5,7 @@ import { Modal } from '../components/ui/Modal';
 import { Plus, Edit, Trash2, MapPin } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
+import { ApiService } from '../lib/api-service';
 
 export function LocationsPage() {
   const { user } = useAuth();
@@ -23,41 +24,21 @@ export function LocationsPage() {
   const fetchLocations = async () => {
     try {
       setLoading(true);
-      // Mock data for demonstration
-      const mockLocations: Location[] = [
-        {
-          id: '1',
-          name: 'Downtown Office',
-          address: '123 Main Street',
-          city: 'New York',
-          country: 'USA',
-          device_count: 24,
-          created_at: '2024-01-01T10:00:00Z',
-          updated_at: '2024-01-01T10:00:00Z'
-        },
-        {
-          id: '2',
-          name: 'West Side Branch',
-          address: '456 Oak Avenue',
-          city: 'Los Angeles',
-          country: 'USA',
-          device_count: 18,
-          created_at: '2024-01-02T10:00:00Z',
-          updated_at: '2024-01-02T10:00:00Z'
-        },
-        {
-          id: '3',
-          name: 'Tech Hub',
-          address: '789 Innovation Drive',
-          city: 'San Francisco',
-          country: 'USA',
-          device_count: 31,
-          created_at: '2024-01-03T10:00:00Z',
-          updated_at: '2024-01-03T10:00:00Z'
-        }
-      ];
-      setLocations(mockLocations);
+      const locations = await ApiService.getLocations();
+      // Transform database data to match Location interface
+      const transformedLocations: Location[] = locations.map((location: any) => ({
+        id: location.id.toString(),
+        name: location.location_name,
+        address: location.address,
+        city: location.city,
+        country: location.country,
+        device_count: 0, // This would need a separate query to count devices per location
+        created_at: location.created_at,
+        updated_at: location.updated_at
+      }));
+      setLocations(transformedLocations);
     } catch (error) {
+      console.error('Failed to load locations:', error);
       toast.error('Failed to load locations');
     } finally {
       setLoading(false);
@@ -73,9 +54,11 @@ export function LocationsPage() {
     if (!confirm('Are you sure you want to delete this location?')) return;
 
     try {
+      await ApiService.deleteLocation(parseInt(locationId));
       setLocations(prev => prev.filter(location => location.id !== locationId));
       toast.success('Location deleted successfully');
     } catch (error) {
+      console.error('Failed to delete location:', error);
       toast.error('Failed to delete location');
     }
   };
@@ -155,16 +138,33 @@ export function LocationsPage() {
       >
         <LocationForm
           onSubmit={async (data) => {
-            const newLocation: Location = {
-              ...data,
-              id: Math.random().toString(36).substr(2, 9),
-              device_count: 0,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            };
-            setLocations(prev => [...prev, newLocation]);
-            setIsAddModalOpen(false);
-            toast.success('Location added successfully');
+            try {
+              const newLocation = await ApiService.createLocation({
+                location_name: data.name,
+                address: data.address,
+                city: data.city,
+                country: data.country
+              });
+              
+              // Transform the response to match Location interface
+              const transformedLocation: Location = {
+                id: newLocation.id.toString(),
+                name: newLocation.location_name,
+                address: newLocation.address,
+                city: newLocation.city,
+                country: newLocation.country,
+                device_count: 0,
+                created_at: newLocation.created_at,
+                updated_at: newLocation.updated_at
+              };
+              
+              setLocations(prev => [...prev, transformedLocation]);
+              setIsAddModalOpen(false);
+              toast.success('Location added successfully');
+            } catch (error) {
+              console.error('Failed to add location:', error);
+              toast.error('Failed to add location');
+            }
           }}
           onCancel={() => setIsAddModalOpen(false)}
         />
@@ -179,14 +179,36 @@ export function LocationsPage() {
         <LocationForm
           location={selectedLocation}
           onSubmit={async (data) => {
-            setLocations(prev => prev.map(location => 
-              location.id === selectedLocation?.id 
-                ? { ...location, ...data, updated_at: new Date().toISOString() }
-                : location
-            ));
-            setIsEditModalOpen(false);
-            setSelectedLocation(null);
-            toast.success('Location updated successfully');
+            try {
+              const updatedLocation = await ApiService.updateLocation(parseInt(selectedLocation!.id), {
+                location_name: data.name,
+                address: data.address,
+                city: data.city,
+                country: data.country
+              });
+              
+              // Transform the response to match Location interface
+              const transformedLocation: Location = {
+                id: updatedLocation.id.toString(),
+                name: updatedLocation.location_name,
+                address: updatedLocation.address,
+                city: updatedLocation.city,
+                country: updatedLocation.country,
+                device_count: selectedLocation?.device_count || 0,
+                created_at: updatedLocation.created_at,
+                updated_at: updatedLocation.updated_at
+              };
+              
+              setLocations(prev => prev.map(location => 
+                location.id === selectedLocation?.id ? transformedLocation : location
+              ));
+              setIsEditModalOpen(false);
+              setSelectedLocation(null);
+              toast.success('Location updated successfully');
+            } catch (error) {
+              console.error('Failed to update location:', error);
+              toast.error('Failed to update location');
+            }
           }}
           onCancel={() => {
             setIsEditModalOpen(false);

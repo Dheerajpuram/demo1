@@ -7,6 +7,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
+import { ApiService } from '../lib/api-service';
 
 export function UtilizationPage() {
   const { user } = useAuth();
@@ -23,62 +24,124 @@ export function UtilizationPage() {
   const fetchUtilizationLogs = async () => {
     try {
       setLoading(true);
-      // Mock data for demonstration
-      const mockLogs: UtilizationLog[] = [
-        {
-          id: '1',
-          device_id: '1',
-          device: {
-            id: '1',
-            name: 'Router RT-001',
-            type: 'router',
-            status: 'in_use',
-            serial_number: 'RT001-2024-001',
-            model: 'Cisco ISR 4321',
-            purchase_date: '2024-01-15',
-            created_at: '2024-01-15T10:00:00Z',
-            updated_at: '2024-01-15T10:00:00Z'
-          },
-          hours_used: 168,
-          log_date: '2024-06-01',
-          notes: 'Full month operation',
-          created_by: 'tech1@telecom.com',
-          created_at: '2024-06-01T10:00:00Z'
+      // Fetch real utilization logs from database
+      const apiLogs = await ApiService.getUtilizationLogs();
+      
+      // Also fetch devices to create sample logs for devices without logs
+      const devices = await ApiService.getDevices();
+      
+      // Transform API data to match frontend expectations
+      const transformedLogs: UtilizationLog[] = apiLogs.map(log => ({
+        id: log.id,
+        device_id: log.device_id,
+        device: {
+          id: log.device_id,
+          name: log.device_name || 'Unknown Device',
+          type: log.device_type || 'unknown',
+          status: 'available', // Default status
+          serial_number: '',
+          model: '',
+          purchase_date: '',
+          created_at: log.created_at,
+          updated_at: log.created_at
         },
-        {
-          id: '2',
-          device_id: '2',
+        hours_used: log.hours_used,
+        log_date: log.date, // Map 'date' to 'log_date'
+        notes: log.notes || '',
+        created_by: log.logged_by_email || 'Unknown',
+        created_at: log.created_at
+      }));
+      
+      // Add sample logs for devices that don't have any logs yet
+      const devicesWithLogs = new Set(transformedLogs.map(log => log.device_id));
+      const sampleLogs: UtilizationLog[] = devices
+        .filter(device => !devicesWithLogs.has(device.id))
+        .map((device, index) => ({
+          id: `sample-${device.id}`,
+          device_id: device.id,
           device: {
-            id: '2',
-            name: 'Switch SW-001',
-            type: 'switch',
-            status: 'in_use',
-            serial_number: 'SW001-2024-001',
-            model: 'Juniper EX3400',
-            purchase_date: '2024-02-10',
-            created_at: '2024-02-10T10:00:00Z',
-            updated_at: '2024-02-10T10:00:00Z'
+            id: device.id,
+            name: device.device_name,
+            type: device.type,
+            status: device.status,
+            serial_number: device.serial_number || '',
+            model: device.model || '',
+            purchase_date: device.purchase_date || '',
+            created_at: device.created_at,
+            updated_at: device.updated_at
           },
-          hours_used: 152,
-          log_date: '2024-06-01',
-          notes: 'Minor downtime for updates',
-          created_by: 'tech2@telecom.com',
-          created_at: '2024-06-01T10:00:00Z'
-        }
-      ];
-      setLogs(mockLogs);
+          hours_used: Math.floor(Math.random() * 20) + 5, // Random hours between 5-25
+          log_date: new Date(Date.now() - ((index + 1) * 24 * 60 * 60 * 1000)).toISOString().split('T')[0], // Different dates, starting from yesterday
+          notes: 'Sample data for demonstration',
+          created_by: 'system@telecom.demo',
+          created_at: new Date().toISOString()
+        }));
+      
+      const allLogs = [...transformedLogs, ...sampleLogs].sort((a, b) => 
+        new Date(a.log_date).getTime() - new Date(b.log_date).getTime()
+      );
+      
+      console.log('All logs (real + sample):', allLogs); // Debug log
+      setLogs(allLogs);
     } catch (error) {
+      console.error('Failed to load utilization logs:', error);
       toast.error('Failed to load utilization logs');
     } finally {
       setLoading(false);
     }
   };
 
-  const chartData = logs.map(log => ({
-    date: format(new Date(log.log_date), 'MMM dd'),
-    hours: log.hours_used,
-    device: log.device?.name || 'Unknown Device'
-  }));
+  const chartData = logs
+    .map(log => {
+      try {
+        const logDate = new Date(log.log_date);
+        return {
+          date: format(logDate, 'MMM dd'),
+          hours: log.hours_used,
+          device: log.device?.name || 'Unknown Device',
+          fullDate: format(logDate, 'MMM dd, yyyy'),
+          notes: log.notes || '',
+          sortDate: logDate,
+          originalDate: log.log_date // Keep original for debugging
+        };
+      } catch (error) {
+        console.error('Error formatting chart data for log:', log, error);
+        return {
+          date: 'Invalid Date',
+          hours: log.hours_used || 0,
+          device: log.device?.name || 'Unknown Device',
+          fullDate: 'Invalid Date',
+          notes: log.notes || '',
+          sortDate: new Date(0),
+          originalDate: log.log_date
+        };
+      }
+    })
+    .sort((a, b) => {
+      // More robust sorting - handle invalid dates
+      const dateA = a.sortDate.getTime();
+      const dateB = b.sortDate.getTime();
+      
+      // If both dates are valid, sort normally
+      if (!isNaN(dateA) && !isNaN(dateB)) {
+        return dateA - dateB;
+      }
+      
+      // If one is invalid, put it at the end
+      if (isNaN(dateA) && !isNaN(dateB)) return 1;
+      if (!isNaN(dateA) && isNaN(dateB)) return -1;
+      
+      // If both are invalid, maintain original order
+      return 0;
+    });
+
+  // Debug log to see the sorted chart data
+  console.log('Chart data after sorting:', chartData.map(item => ({
+    date: item.date,
+    fullDate: item.fullDate,
+    originalDate: item.originalDate,
+    hours: item.hours
+  })));
 
   const columns = [
     { 
@@ -133,7 +196,25 @@ export function UtilizationPage() {
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="date" />
             <YAxis />
-            <Tooltip />
+            <Tooltip 
+              formatter={(value, name, props) => [
+                `${value} hours`,
+                props.payload.device
+              ]}
+              labelFormatter={(label, payload) => {
+                if (payload && payload.length > 0) {
+                  return `${payload[0].payload.fullDate} - ${payload[0].payload.device}`;
+                }
+                return label;
+              }}
+              contentStyle={{
+                backgroundColor: '#1F2937',
+                border: 'none',
+                borderRadius: '8px',
+                color: 'white',
+                padding: '12px'
+              }}
+            />
             <Line type="monotone" dataKey="hours" stroke="#3B82F6" strokeWidth={2} />
           </LineChart>
         </ResponsiveContainer>
@@ -149,15 +230,24 @@ export function UtilizationPage() {
       >
         <UtilizationForm
           onSubmit={async (data) => {
-            const newLog: UtilizationLog = {
-              ...data,
-              id: Math.random().toString(36).substr(2, 9),
-              created_by: user?.email || '',
-              created_at: new Date().toISOString()
-            };
-            setLogs(prev => [newLog, ...prev]);
-            setIsAddModalOpen(false);
-            toast.success('Utilization logged successfully');
+            try {
+              // Create utilization log via API
+              await ApiService.createUtilizationLog({
+                device_id: data.device_id,
+                hours_used: data.hours_used,
+                date: data.log_date, // Map log_date to date for API
+                notes: data.notes || '',
+                logged_by: user?.email || 'admin@telecom.demo'
+              });
+              
+              // Refresh the logs list
+              await fetchUtilizationLogs();
+              setIsAddModalOpen(false);
+              toast.success('Utilization logged successfully');
+            } catch (error) {
+              console.error('Failed to add utilization log:', error);
+              toast.error('Failed to add utilization log');
+            }
           }}
           onCancel={() => setIsAddModalOpen(false)}
         />
@@ -178,12 +268,25 @@ function UtilizationForm({ onSubmit, onCancel }: UtilizationFormProps) {
     log_date: format(new Date(), 'yyyy-MM-dd'),
     notes: ''
   });
+  const [devices, setDevices] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const mockDevices = [
-    { id: '1', name: 'Router RT-001' },
-    { id: '2', name: 'Switch SW-001' },
-    { id: '3', name: 'Modem MD-001' }
-  ];
+  useEffect(() => {
+    const fetchDevices = async () => {
+      try {
+        setLoading(true);
+        const deviceList = await ApiService.getDevices();
+        console.log('Fetched devices:', deviceList); // Debug log
+        setDevices(deviceList);
+      } catch (error) {
+        console.error('Failed to load devices:', error);
+        toast.error('Failed to load devices');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchDevices();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -201,10 +304,11 @@ function UtilizationForm({ onSubmit, onCancel }: UtilizationFormProps) {
           value={formData.device_id}
           onChange={(e) => setFormData({ ...formData, device_id: e.target.value })}
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          disabled={loading}
         >
-          <option value="">Select a device</option>
-          {mockDevices.map(device => (
-            <option key={device.id} value={device.id}>{device.name}</option>
+          <option value="">{loading ? 'Loading devices...' : 'Select a device'}</option>
+          {devices.map(device => (
+            <option key={device.id} value={device.id}>{device.device_name}</option>
           ))}
         </select>
       </div>
